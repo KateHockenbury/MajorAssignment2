@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <title>Massachusetts Population and Income Analysis</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            margin: 0;
+            background-color: #f4f4f9;
+        }
+
+        .container {
+            text-align: center;
+            width: 80%;
+            max-width: 900px;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        h3 {
+            color: #555;
+            margin-top: 0;
+        }
+
+        .map-container {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        #tooltip {
+            position: absolute;
+            opacity: 0;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            pointer-events: none;
+            font-size: 0.9em;
+            color: #333;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+        }
+
+        path {
+            stroke: #333;
+            stroke-width: 0.5px;
+            transition: all 0.2s;
+        }
+
+        path:hover {
+            opacity: 0.7;
+            stroke: #222;
+            stroke-width: 1.5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Massachusetts Population and Income Analysis</h1>
+        <h3>Your Name</h3>
+        <div id="tooltip"></div>
+        
+        <div class="map-container fig1">
+            <h2>MAP A: Actual Population in 1980</h2>
+        </div>
+        <div class="map-container fig2">
+            <h2>MAP B: Population Change (1980 - 2010)</h2>
+        </div>
+        <div class="map-container fig3">
+            <h2>MAP C: Gini Index (2019)</h2>
+        </div>
+    </div>
+
+    <script>
+        const svgWidth = 800;
+        const svgHeight = 500;
+
+        const MA_counties = "towns.topojson";
+        const gini_index = "gini_index.csv";
+
+        Promise.all([
+            d3.json(MA_counties),
+            d3.csv(gini_index)
+        ]).then(([topology_data, csv_data]) => {
+            const yearFilter = "2019";
+            const filteredData = csv_data.filter(d => d.year === yearFilter);
+            const idToData = new Map(filteredData.map(d => [d['Geographic Area Name'], d]));
+
+            const createColorScale = (data, column, colors) => 
+                d3.scaleSequential()
+                    .domain(d3.extent(data, d => +d[column]))
+                    .interpolator(d3.interpolateBlues);
+
+            const generateMap = (topo_data, containerName, colorScale, dataKey, tooltipKey) => {
+                const svg = d3.select(containerName).append("svg")
+                    .attr("width", svgWidth)
+                    .attr("height", svgHeight);
+
+                const geojson = topojson.feature(topo_data, topo_data.objects.ma);
+                const projection = d3.geoMercator().fitSize([svgWidth, svgHeight], geojson);
+                const geoPath = d3.geoPath().projection(projection);
+                const tooltip = d3.select("#tooltip");
+
+                svg.selectAll("path")
+                    .data(geojson.features)
+                    .enter()
+                    .append("path")
+                    .attr("d", geoPath)
+                    .attr("fill", d => {
+                        const data = idToData.get(d.properties.TOWN); 
+                        return data ? colorScale(+data[dataKey]) : "#ccc";
+                    })
+                    .on("mouseenter", (event, d) => {
+                        const data = idToData.get(d.properties.TOWN);
+                        tooltip.transition()
+                            .duration(200)
+                            .style("opacity", 0.9);
+                        tooltip.html(`
+                            <strong>${data[tooltipKey] || 'Unknown'}</strong><br>
+                            Population (1980): ${data['POP1980'] || 'N/A'}<br>
+                            Population Change: ${data['POP_CHANGE_1980_2010'] || 'N/A'}<br>
+                            Gini Index (2019): ${data['Estimate!!Gini Index'] || 'N/A'}
+                        `)
+                        .style("left", (event.pageX + 5) + "px")
+                        .style("top", (event.pageY - 5) + "px");
+                    })
+                    .on("mousemove", (event) => {
+                        tooltip.style("left", (event.pageX + 5) + "px")
+                            .style("top", (event.pageY - 5) + "px");
+                    })
+                    .on("mouseout", () => {
+                        tooltip.transition()
+                            .duration(500)
+                            .style("opacity", 0);
+                    });
+            };
+
+            const population1980Scale = createColorScale(csv_data, 'POP1980', d3.interpolateBlues);
+            const populationChangeScale = d3.scaleDiverging()
+                .domain(d3.extent(csv_data, d => +d['POP_CHANGE_1980_2010']))
+                .interpolator(d3.interpolateRdYlBu);
+            const giniColorScale = createColorScale(csv_data, 'Estimate!!Gini Index', d3.interpolatePurples);
+
+            generateMap(topology_data, ".fig1", population1980Scale, 'POP1980', 'Geographic Area Name');
+            generateMap(topology_data, ".fig2", populationChangeScale, 'POP_CHANGE_1980_2010', 'Geographic Area Name');
+            generateMap(topology_data, ".fig3", giniColorScale, 'Estimate!!Gini Index', 'Geographic Area Name');
+        });
+    </script>
+</body>
+</html>
